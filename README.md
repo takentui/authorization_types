@@ -111,6 +111,51 @@ For a detailed explanation of the authentication process, see the [detailed docu
 - Consider using more secure methods (OAuth2, JWT) for production systems
 - Basic auth is simple but has limitations (no token expiration, no granular permissions)
 
+## Using Nginx for Basic Authentication
+
+This project includes a ready-to-use Nginx configuration as an authentication gateway, which is a common production setup for securing multiple services.
+
+### Running with Docker Compose
+
+The repository already contains the necessary configuration files:
+- `nginx/nginx.conf` - Nginx configuration with basic auth settings
+- `nginx/.htpasswd` - Contains a test user (admin/admin) for demonstration
+
+Simply run:
+
+```bash
+docker-compose up -d
+```
+
+### Accessing the API with Nginx
+
+- Public endpoints: http://localhost/health (no authentication)
+- Protected endpoints: http://localhost/ (requires basic auth)
+  - Use username: `admin`
+  - Password: `admin` (for demo only - change in production)
+
+### Modifying Authentication
+
+To add or change users:
+
+```bash
+# Add a new user
+htpasswd nginx/.htpasswd newuser
+
+# Change existing user's password
+htpasswd nginx/.htpasswd admin
+```
+
+### Detailed Documentation
+
+For a comprehensive guide on using Nginx as an authentication gateway for multiple services, including:
+- Architecture diagrams
+- Advanced configurations
+- Security best practices
+- Multiple service setup
+
+See the detailed documentation: [Nginx Authentication Gateway Guide](docs/nginx_auth_gateway.md)
+
 ## License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
@@ -229,6 +274,51 @@ poetry run pytest tests/test_auth_handlers.py -v
 - Не "хардкодьте" учетные данные; используйте переменные окружения или безопасное хранилище
 - Рассмотрите возможность использования более безопасных методов (OAuth2, JWT) для production систем
 - Basic auth прост, но имеет ограничения (нет срока действия токена, нет детальных разрешений)
+
+## Использование Nginx для базовой аутентификации
+
+Этот проект включает готовую к использованию конфигурацию Nginx в качестве шлюза аутентификации, что является распространенной конфигурацией для обеспечения безопасности нескольких сервисов в production.
+
+### Запуск с Docker Compose
+
+Репозиторий уже содержит необходимые конфигурационные файлы:
+- `nginx/nginx.conf` - Конфигурация Nginx с настройками базовой аутентификации
+- `nginx/.htpasswd` - Содержит тестового пользователя (admin/admin) для демонстрации
+
+Просто выполните:
+
+```bash
+docker-compose up -d
+```
+
+### Доступ к API через Nginx
+
+- Публичные эндпоинты: http://localhost/health (без аутентификации)
+- Защищенные эндпоинты: http://localhost/ (требует базовой аутентификации)
+  - Имя пользователя: `admin`
+  - Пароль: `admin` (только для демонстрации - измените в production)
+
+### Изменение аутентификации
+
+Чтобы добавить или изменить пользователей:
+
+```bash
+# Добавить нового пользователя
+htpasswd nginx/.htpasswd newuser
+
+# Изменить пароль существующего пользователя
+htpasswd nginx/.htpasswd admin
+```
+
+### Подробная документация
+
+Для получения полного руководства по использованию Nginx в качестве шлюза аутентификации для нескольких сервисов, включая:
+- Схемы архитектуры
+- Расширенные конфигурации
+- Лучшие практики безопасности
+- Настройку нескольких сервисов
+
+См. подробную документацию: [Руководство по шлюзу аутентификации Nginx](docs/nginx_auth_gateway.md)
 
 ## Лицензия
 
