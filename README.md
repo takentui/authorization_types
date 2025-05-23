@@ -1,10 +1,10 @@
-# FastAPI Basic Authentication
+# FastAPI Session Authentication
 
-A simple implementation of HTTP Basic Authentication in FastAPI.
+A simple implementation of Cookie-based Session Authentication in FastAPI.
 
 ## Overview
 
-This project demonstrates how to implement HTTP Basic Authentication directly in FastAPI without relying on external tools like Nginx. Basic authentication is handled through FastAPI's security utilities and dependency injection system.
+This project demonstrates how to implement Cookie-based Session Authentication in FastAPI without relying on external tools. Session authentication is handled through FastAPI's cookie dependencies and an in-memory session store.
 
 ## Project Structure
 
@@ -16,23 +16,23 @@ authorization_types/
 │   ├── models.py      # Pydantic models
 │   ├── auth.py        # Authentication implementation
 │   ├── config.py      # Application settings
-│   └── client.py      # Example external API client
 ├── tests/
 │   ├── __init__.py
 │   ├── conftest.py    # Test fixtures
 │   └── test_auth_handlers.py  # Authentication tests
 ├── docs/
-│   └── basic_auth_explained.md  # Detailed explanation
+│   └── session_auth_explained.md  # Detailed explanation
 └── README.md
 ```
 
 ## Implementation Details
 
-- HTTP Basic Authentication is implemented using FastAPI's `HTTPBasic` and `HTTPBasicCredentials`
-- Authentication is performed using the `get_current_user` dependency
-- Protected endpoints require this dependency
-- Public endpoints don't include the dependency
-- For a detailed explanation, see [basic_auth_explained.md](docs/basic_auth_explained.md)
+### Cookie-based Session Authentication
+- Uses in-memory session storage (for simplicity)
+- Login endpoint creates a session and sets a secure HTTP-only cookie
+- Protected endpoints validate the session cookie
+- Logout endpoint clears the session and removes the cookie
+- For a detailed explanation, see [session_auth_explained.md](docs/session_auth_explained.md)
 
 ## Setup and Installation
 
@@ -53,8 +53,8 @@ poetry install
 Set the following environment variables or add them to a `.env` file:
 
 ```
-API_USERNAME=admin      # Username for basic auth
-API_PASSWORD=password   # Password for basic auth
+API_USERNAME=admin      # Username for authentication
+API_PASSWORD=password   # Password for authentication
 ```
 
 ## Running the Application
@@ -69,22 +69,35 @@ The API will be available at http://localhost:8000
 
 ## API Endpoints
 
-- `GET /` - Root endpoint (public)
-- `GET /health` - Health check endpoint (public)
+### Public Endpoints
+- `GET /` - Root endpoint
+- `GET /health` - Health check endpoint
 - `GET /public` - Example public endpoint (no auth required)
-- `GET /protected` - Protected endpoint (requires basic auth)
+
+### Cookie-based Auth Endpoints
+- `POST /login` - Login and create a session
+- `GET /protected` - Protected endpoint (requires valid session cookie)
+- `POST /logout` - Logout and end session
 
 ## Testing the Authentication
 
 ### Using curl
 
+#### Cookie-based Authentication
 ```bash
-# Test public endpoint
-curl http://localhost:8000/public
+# Login and save cookies to a file
+curl -X POST http://localhost:8000/login \
+     -H "Content-Type: application/json" \
+     -d '{"username":"admin","password":"password"}' \
+     -c cookies.txt
 
-# Test protected endpoint with authentication
+# Access protected endpoint using the saved cookies
 curl -X GET http://localhost:8000/protected \
-     -H "Authorization: Basic $(echo -n 'admin:password' | base64)"
+     -b cookies.txt
+
+# Logout
+curl -X POST http://localhost:8000/logout \
+     -b cookies.txt
 ```
 
 ### Using the Test Suite
@@ -95,21 +108,12 @@ Run the automated test suite with:
 poetry run pytest tests/test_auth_handlers.py -v
 ```
 
-## How Basic Auth Works
-
-1. Client includes an `Authorization` header with the format: `Basic <base64-encoded-credentials>`
-2. The base64-encoded part is the string `username:password`
-3. FastAPI decodes and validates these credentials
-4. If valid, the request proceeds; otherwise, a 401 Unauthorized response is returned
-
-For a detailed explanation of the authentication process, see the [detailed documentation](docs/basic_auth_explained.md).
-
 ## Security Considerations
 
-- **ALWAYS use HTTPS in production** - Basic auth sends credentials encoded (not encrypted)
+- **ALWAYS use HTTPS in production** - Authentication sends credentials that must be protected
 - Don't hardcode credentials; use environment variables or a secure vault
-- Consider using more secure methods (OAuth2, JWT) for production systems
-- Basic auth is simple but has limitations (no token expiration, no granular permissions)
+- In production, use a persistent session store (Redis, database) instead of in-memory storage
+- Set appropriate cookie security options (httpOnly, secure, sameSite)
 
 ## License
 
@@ -117,13 +121,13 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ---
 
-# Базовая Аутентификация в FastAPI
+# Сессионная аутентификация в FastAPI
 
-Простая реализация HTTP Basic Authentication в FastAPI.
+Простая реализация аутентификации на основе cookie-сессий в FastAPI.
 
 ## Обзор
 
-Этот проект демонстрирует, как реализовать HTTP Basic Authentication непосредственно в FastAPI без использования внешних инструментов, таких как Nginx. Базовая аутентификация обрабатывается с помощью утилит безопасности FastAPI и системы внедрения зависимостей.
+Этот проект демонстрирует, как реализовать аутентификацию на основе cookie-сессий в FastAPI без использования внешних инструментов. Сессионная аутентификация обрабатывается с помощью cookie-зависимостей FastAPI и хранилища сессий в памяти.
 
 ## Структура проекта
 
@@ -135,23 +139,23 @@ authorization_types/
 │   ├── models.py      # Модели Pydantic
 │   ├── auth.py        # Реализация аутентификации
 │   ├── config.py      # Настройки приложения
-│   └── client.py      # Пример внешнего API-клиента
 ├── tests/
 │   ├── __init__.py
 │   ├── conftest.py    # Тестовые фикстуры
 │   └── test_auth_handlers.py  # Тесты аутентификации
 ├── docs/
-│   └── basic_auth_explained.md  # Подробное объяснение
+│   └── session_auth_explained.md  # Подробное объяснение
 └── README.md
 ```
 
 ## Детали реализации
 
-- HTTP Basic Authentication реализована с использованием `HTTPBasic` и `HTTPBasicCredentials` из FastAPI
-- Аутентификация выполняется с использованием зависимости `get_current_user`
-- Защищенные эндпоинты требуют эту зависимость
-- Публичные эндпоинты не включают эту зависимость
-- Для подробного объяснения смотрите [basic_auth_explained.md](docs/basic_auth_explained.md)
+### Аутентификация на основе cookie-сессий
+- Использует хранилище сессий в памяти (для простоты)
+- Эндпоинт входа создает сессию и устанавливает безопасный HTTP-only cookie
+- Защищенные эндпоинты проверяют наличие и валидность cookie сессии
+- Эндпоинт выхода очищает сессию и удаляет cookie
+- Для подробного объяснения смотрите [session_auth_explained.md](docs/session_auth_explained.md)
 
 ## Настройка и установка
 
@@ -172,8 +176,8 @@ poetry install
 Установите следующие переменные окружения или добавьте их в файл `.env`:
 
 ```
-API_USERNAME=admin      # Имя пользователя для базовой аутентификации
-API_PASSWORD=password   # Пароль для базовой аутентификации
+API_USERNAME=admin      # Имя пользователя для аутентификации
+API_PASSWORD=password   # Пароль для аутентификации
 ```
 
 ## Запуск приложения
@@ -188,22 +192,35 @@ API будет доступен по адресу http://localhost:8000
 
 ## Эндпоинты API
 
-- `GET /` - Корневой эндпоинт (публичный)
-- `GET /health` - Эндпоинт проверки работоспособности (публичный)
+### Публичные эндпоинты
+- `GET /` - Корневой эндпоинт
+- `GET /health` - Эндпоинт проверки работоспособности
 - `GET /public` - Пример публичного эндпоинта (аутентификация не требуется)
-- `GET /protected` - Защищенный эндпоинт (требуется базовая аутентификация)
+
+### Эндпоинты с аутентификацией на основе cookie
+- `POST /login` - Вход и создание сессии
+- `GET /protected` - Защищенный эндпоинт (требуется валидный cookie сессии)
+- `POST /logout` - Выход и завершение сессии
 
 ## Тестирование аутентификации
 
 ### Использование curl
 
+#### Аутентификация на основе cookie
 ```bash
-# Тест публичного эндпоинта
-curl http://localhost:8000/public
+# Вход и сохранение cookies в файл
+curl -X POST http://localhost:8000/login \
+     -H "Content-Type: application/json" \
+     -d '{"username":"admin","password":"password"}' \
+     -c cookies.txt
 
-# Тест защищенного эндпоинта с аутентификацией
+# Доступ к защищенному эндпоинту с использованием сохраненных cookies
 curl -X GET http://localhost:8000/protected \
-     -H "Authorization: Basic $(echo -n 'admin:password' | base64)"
+     -b cookies.txt
+
+# Выход
+curl -X POST http://localhost:8000/logout \
+     -b cookies.txt
 ```
 
 ### Использование набора тестов
@@ -214,21 +231,12 @@ curl -X GET http://localhost:8000/protected \
 poetry run pytest tests/test_auth_handlers.py -v
 ```
 
-## Как работает Basic Auth
-
-1. Клиент включает заголовок `Authorization` в формате: `Basic <base64-закодированные-учетные-данные>`
-2. Часть, закодированная в base64, представляет собой строку `username:password`
-3. FastAPI декодирует и проверяет эти учетные данные
-4. Если данные действительны, запрос продолжается; в противном случае возвращается ответ 401 Unauthorized
-
-Для подробного объяснения процесса аутентификации см. [подробную документацию](docs/basic_auth_explained.md).
-
 ## Соображения безопасности
 
-- **ВСЕГДА используйте HTTPS в production** - Basic auth отправляет учетные данные в кодированном (но не зашифрованном) виде
+- **ВСЕГДА используйте HTTPS в production** - Аутентификация отправляет учетные данные, которые должны быть защищены
 - Не "хардкодьте" учетные данные; используйте переменные окружения или безопасное хранилище
-- Рассмотрите возможность использования более безопасных методов (OAuth2, JWT) для production систем
-- Basic auth прост, но имеет ограничения (нет срока действия токена, нет детальных разрешений)
+- В production используйте постоянное хранилище сессий (Redis, база данных) вместо хранения в памяти
+- Установите соответствующие параметры безопасности для cookie (httpOnly, secure, sameSite)
 
 ## Лицензия
 

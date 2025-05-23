@@ -1,9 +1,10 @@
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI, Depends, Response, Cookie, status, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from typing import Optional
 
-from app.auth import get_current_user
+from app.auth import get_current_user_from_cookie, create_session, end_session, validate_credentials
 from app.config import settings
-from app.models import ErrorMessage
+from app.models import ErrorMessage, LoginRequest, LoginResponse
 
 app = FastAPI(
     title=settings.APP_NAME,
@@ -24,7 +25,7 @@ app.add_middleware(
 @app.get("/")
 async def root():
     """Root endpoint."""
-    return {"message": "Welcome to the FastAPI Basic Auth Example"}
+    return {"message": "Welcome to the FastAPI Session Auth Example"}
 
 
 @app.get("/health")
@@ -32,27 +33,85 @@ async def health_check():
     """Health check endpoint."""
     return {"status": "healthy"}
 
+
 @app.get("/public")
 async def public_route():
     """Example public route accessible without authentication."""
     return {"message": "This is a public route", "data": "public information"}
 
-@app.get(
-    "/protected",
-    summary="Protected route (requires authentication)",
-    description="This endpoint requires Basic Authentication to access",
+
+@app.post(
+    "/login",
+    response_model=LoginResponse,
+    summary="Login with username and password",
+    description="Create a session and set a cookie",
     responses={
-        200: {"description": "Successful response"},
+        200: {"description": "Login successful"},
         401: {
             "model": ErrorMessage,
             "description": "Unauthorized: Invalid credentials"
         }
     }
 )
-async def protected_route(username: str = Depends(get_current_user)):
-    """Protected route that requires basic authentication."""
+async def login(login_request: LoginRequest, response: Response):
+    """Login endpoint that creates a session and sets a cookie."""
+    # Validate credentials
+    if not validate_credentials(login_request.username, login_request.password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid username or password"
+        )
+    
+    # Create session and set cookie
+    create_session(login_request.username, response)
+    
+    return LoginResponse(username=login_request.username)
+
+
+@app.get(
+    "/protected",
+    summary="Protected route (requires session cookie)",
+    description="This endpoint requires a valid session cookie to access",
+    responses={
+        200: {"description": "Successful response"},
+        401: {
+            "model": ErrorMessage,
+            "description": "Unauthorized: Invalid or missing session"
+        }
+    }
+)
+async def protected_route(username: str = Depends(get_current_user_from_cookie)):
+    """Protected route that requires a valid session cookie."""
     return {
         "message": "This is a protected route",
-        "data": "secret information",
+        "data": "secret information accessible with cookie",
         "authenticated_user": username
     }
+
+
+@app.post(
+    "/logout",
+    summary="Logout and end session",
+    description="End the current session and clear the session cookie",
+    responses={
+        200: {"description": "Logout successful"},
+        401: {
+            "model": ErrorMessage,
+            "description": "Unauthorized: Invalid or missing session"
+        }
+    }
+)
+async def logout(
+    response: Response, 
+    session_token: Optional[str] = Cookie(None, alias="session_token")
+):
+    """Logout endpoint that ends the session and clears the cookie."""
+    if not session_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="No active session"
+        )
+    
+    end_session(session_token, response)
+    
+    return {"message": "Logout successful"}

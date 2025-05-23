@@ -1,15 +1,16 @@
 from pydantic_settings import BaseSettings
+from typing import Optional
 
 
 class Settings(BaseSettings):
     """Application settings."""
-    APP_NAME: str = "FastAPI Basic Auth Example"
-    API_PREFIX: str = "/api"
+    APP_NAME: str = "FastAPI Auth Examples"
     DEBUG: bool = False
-
+    API_USERNAME: str = "admin"
+    API_PASSWORD: str = "password"
+    
     class Config:
         env_file = ".env"
-        env_file_encoding = "utf-8"
 
 
 settings = Settings()
