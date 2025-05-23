@@ -14,5 +14,7 @@ class LoginRequest(BaseModel):
 
 class LoginResponse(BaseModel):
     """Login response model."""
+    access_token: str
+    token_type: str = "bearer"
     username: str
     message: str = "Login successful"
