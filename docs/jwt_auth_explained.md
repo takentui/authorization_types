@@ -1,11 +1,12 @@
 # JWT Token Authentication in FastAPI
 
-This guide provides a comprehensive overview of implementing JWT (JSON Web Token) authentication in FastAPI applications.
+This guide provides a comprehensive overview of implementing JWT (JSON Web Token) authentication with refresh tokens in FastAPI applications.
 
 ## Table of Contents
 
 - [English Guide](#english-guide)
   - [What is JWT Authentication?](#what-is-jwt-authentication)
+  - [Refresh Token System](#refresh-token-system)
   - [Implementation Overview](#implementation-overview)
   - [Code Structure](#code-structure)
   - [API Endpoints](#api-endpoints)
@@ -14,6 +15,7 @@ This guide provides a comprehensive overview of implementing JWT (JSON Web Token
   - [Production Deployment](#production-deployment)
 - [Russian Guide](#russian-guide)
   - [Что такое JWT аутентификация?](#что-такое-jwt-аутентификация)
+  - [Система Refresh токенов](#система-refresh-токенов)
   - [Обзор реализации](#обзор-реализации)
   - [Структура кода](#структура-кода)
   - [API эндпоинты](#api-эндпоинты)
@@ -39,15 +41,38 @@ eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhZG1pbiIsImV4cCI6MTcwNzMyNDg2NX0
 │─────────── Header ────────────────││────────── Payload ───────────────────────││─ Signature ─│
 ```
 
+### Refresh Token System
+
+Our implementation uses a dual-token approach for enhanced security and user experience:
+
+**Access Tokens:**
+- Short-lived (30 minutes default)
+- Used for API authentication
+- JWT format with signature verification
+- Stored client-side
+
+**Refresh Tokens:**
+- Long-lived (7 days default)
+- Used to obtain new access tokens
+- Random secure string (not JWT)
+- Stored both server-side and client-side
+
+**Benefits:**
+- **Security**: Short access token lifetime reduces exposure window
+- **User Experience**: Long refresh tokens prevent frequent re-authentication
+- **Revocation**: Immediate token invalidation on logout
+- **Flexibility**: Different expiration policies for different token types
+
 ### Implementation Overview
 
 Our JWT authentication system includes:
 
-- **Token Creation**: Generate JWT tokens with user claims and expiration
+- **Token Creation**: Generate both access and refresh tokens on login
 - **Token Validation**: Verify token signature and expiration
+- **Token Refresh**: Exchange refresh token for new access token
 - **Token Blacklisting**: Revoke tokens on logout for security
 - **Protected Routes**: Secure endpoints requiring valid tokens
-- **Automatic Cleanup**: Remove expired tokens from blacklist
+- **Automatic Cleanup**: Remove expired tokens from storage
 
 ### Code Structure
 
@@ -59,51 +84,94 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import jwt
 import secrets
 from datetime import datetime, timedelta, timezone
+from typing import Optional, Dict, Tuple
 
-# Token blacklist for logout functionality
+# Token storage (use Redis in production)
 blacklisted_tokens: Dict[str, datetime] = {}
-security = HTTPBearer()
+refresh_tokens: Dict[str, Dict] = {}  # token -> {"username": str, "exp": datetime}
+
+def create_token_pair(username: str) -> Tuple[str, str]:
+    """Create both access and refresh tokens for the user."""
+    access_token = create_jwt_token(username)
+    refresh_token = create_refresh_token(username)
+    return access_token, refresh_token
 
 def create_jwt_token(username: str, expires_delta: Optional[timedelta] = None) -> str:
-    """Create a JWT token with user claims and expiration."""
+    """Create a JWT access token for the user."""
     if expires_delta:
         expire = datetime.now(timezone.utc) + expires_delta
     else:
-        expire = datetime.now(timezone.utc) + timedelta(minutes=30)
+        expire = datetime.now(timezone.utc) + timedelta(minutes=30)  # Short-lived
     
     payload = {
         "sub": username,  # Subject (user identifier)
-        "exp": expire,    # Expiration time
-        "iat": datetime.now(timezone.utc),  # Issued at
-        "jti": secrets.token_urlsafe(16)    # JWT ID (unique identifier)
+        "exp": int(expire.timestamp()),    # Expiration time as Unix timestamp
+        "iat": int(datetime.now(timezone.utc).timestamp()),  # Issued at
+        "jti": secrets.token_urlsafe(16),   # JWT ID (unique identifier)
+        "type": "access"  # Token type
     }
     
     return jwt.encode(payload, get_jwt_secret_key(), algorithm="HS256")
 
-def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> str:
-    """Extract and validate the current user from JWT token."""
-    token = credentials.credentials
-    payload = decode_jwt_token(token)
-    username = payload.get("sub")
+def create_refresh_token(username: str, expires_delta: Optional[timedelta] = None) -> str:
+    """Create a refresh token for the user."""
+    if expires_delta:
+        expire = datetime.now(timezone.utc) + expires_delta
+    else:
+        expire = datetime.now(timezone.utc) + timedelta(days=7)  # Long-lived
     
-    if username is None:
+    refresh_token = secrets.token_urlsafe(32)
+    
+    # Store refresh token info
+    refresh_tokens[refresh_token] = {
+        "username": username,
+        "exp": expire
+    }
+    
+    return refresh_token
+
+def validate_refresh_token(refresh_token: str) -> str:
+    """Validate refresh token and return username."""
+    if refresh_token not in refresh_tokens:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token payload"
+            detail="Invalid refresh token"
         )
     
-    return username
+    token_info = refresh_tokens[refresh_token]
+    
+    # Check if token is expired
+    if token_info["exp"] < datetime.now(timezone.utc):
+        # Remove expired token
+        del refresh_tokens[refresh_token]
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token has expired"
+        )
+    
+    return token_info["username"]
 ```
 
 #### Models (`app/models.py`)
 
 ```python
 class LoginResponse(BaseModel):
-    """Login response with JWT token."""
+    """Login response model with both access and refresh tokens."""
     access_token: str
+    refresh_token: str
     token_type: str = "bearer"
     username: str
     message: str = "Login successful"
+
+class RefreshTokenRequest(BaseModel):
+    """Refresh token request model."""
+    refresh_token: str
+
+class RefreshTokenResponse(BaseModel):
+    """Refresh token response model with new access token."""
+    access_token: str
+    token_type: str = "bearer"
+    message: str = "Token refreshed successfully"
 ```
 
 ### API Endpoints
@@ -123,30 +191,35 @@ Content-Type: application/json
 ```json
 {
     "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+    "refresh_token": "a3B9d2F5c3RyaW5nX3JhbmRvbV92YWx1ZQ",
     "token_type": "bearer",
     "username": "admin",
     "message": "Login successful"
 }
 ```
 
-#### 2. Protected Endpoint
+#### 2. Token Refresh Endpoint
 ```http
-GET /protected
-Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+POST /refresh
+Content-Type: application/json
+
+{
+    "refresh_token": "a3B9d2F5c3RyaW5nX3JhbmRvbV92YWx1ZQ"
+}
 ```
 
 **Response:**
 ```json
 {
-    "message": "This is a protected route",
-    "data": "secret information accessible with JWT token",
-    "authenticated_user": "admin"
+    "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+    "token_type": "bearer",
+    "message": "Token refreshed successfully"
 }
 ```
 
-#### 3. User Info Endpoint
+#### 3. Protected Endpoint
 ```http
-GET /me
+GET /protected
 Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 ```
 
@@ -154,6 +227,11 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 ```http
 POST /logout
 Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+Content-Type: application/json
+
+{
+    "refresh_token": "a3B9d2F5c3RyaW5nX3JhbmRvbV92YWx1ZQ"
+}
 ```
 
 ### Testing JWT Authentication
@@ -161,16 +239,29 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 #### Test Structure
 ```python
 @pytest.fixture
-def auth_headers(login_user):
-    """Create authorization headers with JWT token."""
-    token = login_user.json()["access_token"]
-    return {"Authorization": f"Bearer {token}"}
+def refresh_token(login_user):
+    """Get refresh token from login response."""
+    return login_user.json()["refresh_token"]
 
-def test_protected_route_with_valid_token(client, auth_headers):
-    """Test protected route with valid JWT token."""
+def test_refresh_token_flow_integration(client):
+    """Test complete refresh token flow integration."""
+    # 1. Login and get both tokens
+    login_response = client.post("/login", json={"username": "admin", "password": "password"})
+    tokens = login_response.json()
+    
+    # 2. Use access token
+    auth_headers = {"Authorization": f"Bearer {tokens['access_token']}"}
     response = client.get("/protected", headers=auth_headers)
     assert response.status_code == 200
-    assert response.json()["authenticated_user"] == "admin"
+    
+    # 3. Refresh access token
+    refresh_response = client.post("/refresh", json={"refresh_token": tokens["refresh_token"]})
+    new_token = refresh_response.json()["access_token"]
+    
+    # 4. Use new token
+    new_headers = {"Authorization": f"Bearer {new_token}"}
+    response = client.get("/protected", headers=new_headers)
+    assert response.status_code == 200
 ```
 
 #### Running Tests
@@ -180,40 +271,48 @@ poetry install
 
 # Run all tests
 poetry run pytest
-
-# Run with coverage
-poetry run pytest --cov=app tests/
 ```
 
 ### Security Considerations
 
-#### 1. Secret Key Management
-- Use a strong, randomly generated secret key
-- Store secret keys in environment variables
-- Rotate keys regularly in production
+#### 1. Token Lifetimes
+- **Access tokens**: Keep short (15-60 minutes) to limit exposure
+- **Refresh tokens**: Longer (days/weeks) for user convenience
+- **Balance**: Security vs. user experience
 
+#### 2. Refresh Token Security
+- **Storage**: Store refresh tokens securely server-side
+- **Rotation**: Consider rotating refresh tokens on use
+- **Revocation**: Immediate revocation on logout/suspicious activity
+- **Not JWT**: Use random strings to prevent token inspection
+
+#### 3. Access Token Security
+- **JWT Benefits**: Stateless verification, embedded claims
+- **Blacklisting**: Maintain blacklist for logout functionality
+- **Secret Management**: Use strong, rotated secret keys
+
+#### 4. Implementation Best Practices
 ```python
-JWT_SECRET_KEY = secrets.token_urlsafe(32)  # Generate 32-byte key
-```
+# Secure refresh token validation
+def validate_refresh_token(refresh_token: str) -> str:
+    if refresh_token not in refresh_tokens:
+        raise HTTPException(status_code=401, detail="Invalid refresh token")
+    
+    token_info = refresh_tokens[refresh_token]
+    if token_info["exp"] < datetime.now(timezone.utc):
+        del refresh_tokens[refresh_token]  # Clean up expired token
+        raise HTTPException(status_code=401, detail="Refresh token has expired")
+    
+    return token_info["username"]
 
-#### 2. Token Expiration
-- Set appropriate expiration times (15-60 minutes)
-- Implement refresh token mechanism for longer sessions
-- Balance security with user experience
-
-#### 3. Token Blacklisting
-- Blacklist tokens on logout for immediate revocation
-- Clean up expired tokens to prevent memory leaks
-- Consider using Redis for distributed applications
-
-#### 4. HTTPS Only
-```python
-# In production, always use HTTPS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["https://yourdomain.com"],
-    allow_credentials=True,
-)
+# Secure logout with both tokens
+async def logout(refresh_request: RefreshTokenRequest = None, 
+                credentials: HTTPAuthorizationCredentials = Depends(security)):
+    access_token = credentials.credentials
+    blacklist_token(access_token)  # Blacklist access token
+    
+    if refresh_request and refresh_request.refresh_token:
+        revoke_refresh_token(refresh_request.refresh_token)  # Revoke refresh token
 ```
 
 ### Production Deployment
@@ -223,39 +322,31 @@ app.add_middleware(
 export JWT_SECRET_KEY="your-super-secret-key-here"
 export API_USERNAME="your-username"
 export API_PASSWORD="your-secure-password"
+export ACCESS_TOKEN_EXPIRE_MINUTES=30
+export REFRESH_TOKEN_EXPIRE_DAYS=7
 ```
 
-#### Docker Configuration
-```dockerfile
-FROM python:3.11-slim
+#### Redis Configuration (Recommended)
+```python
+# Replace in-memory storage with Redis
+import redis
 
-WORKDIR /app
-COPY . .
+redis_client = redis.Redis(host='localhost', port=6379, db=0)
 
-RUN pip install poetry
-RUN poetry install --no-dev
+def store_refresh_token(token: str, username: str, expires_in: timedelta):
+    """Store refresh token in Redis with expiration."""
+    redis_client.setex(
+        f"refresh_token:{token}", 
+        int(expires_in.total_seconds()),
+        username
+    )
 
-EXPOSE 8000
-
-CMD ["poetry", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
-```
-
-#### Nginx Configuration
-```nginx
-server {
-    listen 443 ssl;
-    server_name yourdomain.com;
-
-    ssl_certificate /path/to/cert.pem;
-    ssl_certificate_key /path/to/key.pem;
-
-    location / {
-        proxy_pass http://localhost:8000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header Authorization $http_authorization;
-    }
-}
+def validate_refresh_token_redis(refresh_token: str) -> str:
+    """Validate refresh token from Redis."""
+    username = redis_client.get(f"refresh_token:{refresh_token}")
+    if not username:
+        raise HTTPException(status_code=401, detail="Invalid or expired refresh token")
+    return username.decode()
 ```
 
 ---
@@ -270,187 +361,107 @@ JWT (JSON Web Token) - это компактный, URL-безопасный с�
 2. **Полезная нагрузка (Payload)**: Содержит утверждения (данные пользователя и метаданные)
 3. **Подпись (Signature)**: Используется для проверки того, что токен не был изменен
 
-**Пример структуры JWT:**
-```
-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhZG1pbiIsImV4cCI6MTcwNzMyNDg2NX0.signature
-│─────────── Заголовок ───────────││───────── Нагрузка ──────────││─ Подпись ─│
-```
+### Система Refresh токенов
+
+Наша реализация использует двойную систему токенов для повышенной безопасности и пользовательского опыта:
+
+**Access токены:**
+- Короткоживущие (30 минут по умолчанию)
+- Используются для аутентификации API
+- Формат JWT с проверкой подписи
+- Хранятся на клиентской стороне
+
+**Refresh токены:**
+- Долгоживущие (7 дней по умолчанию)
+- Используются для получения новых access токенов
+- Случайная безопасная строка (не JWT)
+- Хранятся как на серверной, так и на клиентской стороне
+
+**Преимущества:**
+- **Безопасность**: Короткое время жизни access токена уменьшает окно уязвимости
+- **Пользовательский опыт**: Долгие refresh токены предотвращают частую повторную аутентификацию
+- **Отзыв**: Немедленная инвалидация токенов при выходе
+- **Гибкость**: Различные политики истечения для разных типов токенов
 
 ### Обзор реализации
 
 Наша система JWT аутентификации включает:
 
-- **Создание токенов**: Генерация JWT токенов с утверждениями пользователя и временем истечения
+- **Создание токенов**: Генерация как access, так и refresh токенов при входе
 - **Валидация токенов**: Проверка подписи токена и времени истечения
-- **Черный список токенов**: Отзыв токенов при выходе для безопасности
+- **Обновление токенов**: Обмен refresh токена на новый access токен
+- **Блэклист токенов**: Отзыв токенов при выходе для безопасности
 - **Защищенные маршруты**: Безопасные эндпоинты, требующие действительные токены
-- **Автоматическая очистка**: Удаление истекших токенов из черного списка
+- **Автоматическая очистка**: Удаление истекших токенов из хранилища
 
 ### Структура кода
 
 #### Модуль аутентификации (`app/auth.py`)
 
 ```python
-from fastapi import HTTPException, status, Depends
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-import jwt
-import secrets
-from datetime import datetime, timedelta, timezone
+def create_token_pair(username: str) -> Tuple[str, str]:
+    """Создает оба токена - access и refresh для пользователя."""
+    access_token = create_jwt_token(username)
+    refresh_token = create_refresh_token(username)
+    return access_token, refresh_token
 
-# Черный список токенов для функции выхода
-blacklisted_tokens: Dict[str, datetime] = {}
-security = HTTPBearer()
-
-def create_jwt_token(username: str, expires_delta: Optional[timedelta] = None) -> str:
-    """Создает JWT токен с утверждениями пользователя и временем истечения."""
+def create_refresh_token(username: str, expires_delta: Optional[timedelta] = None) -> str:
+    """Создает refresh токен для пользователя."""
     if expires_delta:
         expire = datetime.now(timezone.utc) + expires_delta
     else:
-        expire = datetime.now(timezone.utc) + timedelta(minutes=30)
+        expire = datetime.now(timezone.utc) + timedelta(days=7)  # Долгоживущий
     
-    payload = {
-        "sub": username,  # Субъект (идентификатор пользователя)
-        "exp": expire,    # Время истечения
-        "iat": datetime.now(timezone.utc),  # Время выдачи
-        "jti": secrets.token_urlsafe(16)    # ID JWT (уникальный идентификатор)
+    refresh_token = secrets.token_urlsafe(32)
+    
+    # Сохраняем информацию о refresh токене
+    refresh_tokens[refresh_token] = {
+        "username": username,
+        "exp": expire
     }
     
-    return jwt.encode(payload, get_jwt_secret_key(), algorithm="HS256")
-
-def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> str:
-    """Извлекает и проверяет текущего пользователя из JWT токена."""
-    token = credentials.credentials
-    payload = decode_jwt_token(token)
-    username = payload.get("sub")
-    
-    if username is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Недействительная нагрузка токена"
-        )
-    
-    return username
-```
-
-#### Модели (`app/models.py`)
-
-```python
-class LoginResponse(BaseModel):
-    """Ответ входа с JWT токеном."""
-    access_token: str
-    token_type: str = "bearer"
-    username: str
-    message: str = "Вход выполнен успешно"
+    return refresh_token
 ```
 
 ### API эндпоинты
 
 #### 1. Эндпоинт входа
+Возвращает оба токена при успешном входе.
+
+#### 2. Эндпоинт обновления токена
 ```http
-POST /login
+POST /refresh
 Content-Type: application/json
 
 {
-    "username": "admin",
-    "password": "password"
+    "refresh_token": "a3B9d2F5c3RyaW5nX3JhbmRvbV92YWx1ZQ"
 }
 ```
 
-**Ответ:**
-```json
-{
-    "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-    "token_type": "bearer",
-    "username": "admin",
-    "message": "Вход выполнен успешно"
-}
-```
-
-#### 2. Защищенный эндпоинт
-```http
-GET /protected
-Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
-```
-
-**Ответ:**
-```json
-{
-    "message": "Это защищенный маршрут",
-    "data": "секретная информация, доступная с JWT токеном",
-    "authenticated_user": "admin"
-}
-```
-
-#### 3. Эндпоинт информации о пользователе
-```http
-GET /me
-Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
-```
-
-#### 4. Эндпоинт выхода
-```http
-POST /logout
-Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
-```
-
-### Тестирование JWT аутентификации
-
-#### Структура тестов
-```python
-@pytest.fixture
-def auth_headers(login_user):
-    """Создает заголовки авторизации с JWT токеном."""
-    token = login_user.json()["access_token"]
-    return {"Authorization": f"Bearer {token}"}
-
-def test_protected_route_with_valid_token(client, auth_headers):
-    """Тестирует защищенный маршрут с действительным JWT токеном."""
-    response = client.get("/protected", headers=auth_headers)
-    assert response.status_code == 200
-    assert response.json()["authenticated_user"] == "admin"
-```
-
-#### Запуск тестов
-```bash
-# Установка зависимостей
-poetry install
-
-# Запуск всех тестов
-poetry run pytest
-
-# Запуск с покрытием
-poetry run pytest --cov=app tests/
-```
+#### 3. Эндпоинт выхода
+Принимает оба токена для полного выхода из системы.
 
 ### Соображения безопасности
 
-#### 1. Управление секретными ключами
-- Используйте сильный, случайно сгенерированный секретный ключ
-- Храните секретные ключи в переменных окружения
-- Регулярно обновляйте ключи в продакшене
+#### 1. Время жизни токенов
+- **Access токены**: Держите короткими (15-60 минут) для ограничения уязвимости
+- **Refresh токены**: Длиннее (дни/недели) для удобства пользователя
 
+#### 2. Безопасность Refresh токенов
+- **Хранение**: Безопасное серверное хранение refresh токенов
+- **Ротация**: Рассмотрите ротацию refresh токенов при использовании
+- **Отзыв**: Немедленный отзыв при выходе/подозрительной активности
+
+#### 3. Продакшен конфигурация
 ```python
-JWT_SECRET_KEY = secrets.token_urlsafe(32)  # Генерация 32-байтного ключа
-```
-
-#### 2. Истечение токенов
-- Установите подходящее время истечения (15-60 минут)
-- Реализуйте механизм обновления токенов для длительных сессий
-- Балансируйте безопасность с пользовательским опытом
-
-#### 3. Черный список токенов
-- Добавляйте токены в черный список при выходе для немедленного отзыва
-- Очищайте истекшие токены для предотвращения утечек памяти
-- Рассмотрите использование Redis для распределенных приложений
-
-#### 4. Только HTTPS
-```python
-# В продакшене всегда используйте HTTPS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["https://yourdomain.com"],
-    allow_credentials=True,
-)
+# Использование Redis для продакшена
+def store_refresh_token_redis(token: str, username: str, expires_in: timedelta):
+    """Сохранить refresh токен в Redis с истечением."""
+    redis_client.setex(
+        f"refresh_token:{token}", 
+        int(expires_in.total_seconds()),
+        username
+    )
 ```
 
 ### Продакшен развертывание
@@ -460,36 +471,14 @@ app.add_middleware(
 export JWT_SECRET_KEY="ваш-супер-секретный-ключ-здесь"
 export API_USERNAME="ваш-логин"
 export API_PASSWORD="ваш-безопасный-пароль"
+export ACCESS_TOKEN_EXPIRE_MINUTES=30
+export REFRESH_TOKEN_EXPIRE_DAYS=7
 ```
 
-#### Конфигурация Docker
-```dockerfile
-FROM python:3.11-slim
-
-WORKDIR /app
-COPY . .
-
-RUN pip install poetry
-RUN poetry install --no-dev
-
-EXPOSE 8000
-
-CMD ["poetry", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
-```
-
-#### Конфигурация Nginx
-```nginx
-server {
-    listen 443 ssl;
-    server_name yourdomain.com;
-
-    ssl_certificate /path/to/cert.pem;
-    ssl_certificate_key /path/to/key.pem;
-
-    location / {
-        proxy_pass http://localhost:8000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header Authorization $http_authorization;
-    }
-} 
+#### Рекомендации по безопасности
+- Используйте HTTPS в продакшене
+- Храните refresh токены в Redis или базе данных
+- Реализуйте ротацию токенов
+- Мониторьте подозрительную активность
+- Регулярно обновляйте секретные ключи
+</rewritten_file>
