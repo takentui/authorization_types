@@ -24,7 +24,9 @@ def client():
 def test_root_endpoint(client):
     response = client.get("/")
     assert response.status_code == status.HTTP_200_OK
-    assert response.json() == {"message": "Welcome to the FastAPI JWT Auth Example"}
+    assert response.json() == {
+        "message": "Welcome to the FastAPI JWT Auth Example with OAuth"
+    }
 
 
 def test_health_endpoint(client):

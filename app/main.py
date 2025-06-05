@@ -21,6 +21,7 @@ from app.models import (
     RefreshTokenRequest,
     RefreshTokenResponse,
 )
+from app.oauth.handlers import router as oauth_router
 
 app = FastAPI(
     title=settings.APP_NAME,
@@ -37,11 +38,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Include OAuth router
+app.include_router(oauth_router)
+
 
 @app.get("/")
 async def root():
     """Root endpoint."""
-    return {"message": "Welcome to the FastAPI JWT Auth Example"}
+    return {"message": "Welcome to the FastAPI JWT Auth Example with OAuth"}
 
 
 @app.get("/health")

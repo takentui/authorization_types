@@ -3,13 +3,15 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.auth import blacklisted_tokens, refresh_tokens
+from app.database.users import clear_oauth_users
 
 
 @pytest.fixture(autouse=True)
 def clear_token_stores():
-    """Clear all token stores before each test."""
+    """Clear all token stores and OAuth users before each test."""
     blacklisted_tokens.clear()
     refresh_tokens.clear()
+    clear_oauth_users()
     yield
 
 

@@ -1,13 +1,16 @@
 # FastAPI JWT Token Authentication
 
-A comprehensive example of implementing JWT (JSON Web Token) authentication in FastAPI with Python, including refresh token functionality.
+A comprehensive example of implementing JWT (JSON Web Token) authentication in FastAPI with Python, including refresh token functionality and GitHub OAuth 2.0 integration.
 
 ## Features
 
 - **JWT Token Authentication**: Secure token-based authentication using PyJWT
 - **Refresh Token System**: Long-lived refresh tokens for seamless user experience
+- **GitHub OAuth 2.0**: Complete OAuth integration with GitHub authentication
+- **Dual Authentication**: Both username/password and OAuth login methods
 - **Token Blacklisting**: Secure logout functionality with token revocation
 - **Protected Routes**: Secure endpoints requiring valid JWT tokens
+- **OAuth User Management**: Automatic GitHub user creation and profile sync
 - **Automatic Token Cleanup**: Prevents memory leaks from expired tokens
 - **Comprehensive Testing**: Full test suite with pytest and fixture patterns
 - **Production Ready**: Environment variables, error handling, and security best practices
@@ -29,7 +32,22 @@ poetry install
 export API_USERNAME="admin"
 export API_PASSWORD="password"
 export JWT_SECRET_KEY="your-super-secret-jwt-key"
+
+# For GitHub OAuth (optional)
+export GITHUB_CLIENT_ID="your_github_client_id"
+export GITHUB_CLIENT_SECRET="your_github_client_secret"
+export GITHUB_REDIRECT_URI="http://localhost:8000/auth/github/callback"
 ```
+
+### GitHub OAuth Setup (Optional)
+
+1. Go to [GitHub Developer Settings](https://github.com/settings/developers)
+2. Click "New OAuth App"
+3. Fill in the details:
+   - Application name: Your app name
+   - Homepage URL: `http://localhost:8000`
+   - Authorization callback URL: `http://localhost:8000/auth/github/callback`
+4. Save the Client ID and Client Secret
 
 ### Running the Application
 
@@ -150,18 +168,60 @@ curl -X POST "http://localhost:8000/logout" \
 }
 ```
 
+### 6. GitHub OAuth Login
+
+```bash
+# Get GitHub OAuth authorization URL
+curl -X GET "http://localhost:8000/auth/github"
+```
+
+**Response:**
+```json
+{
+  "auth_url": "https://github.com/login/oauth/authorize?client_id=...",
+  "state": "optional_state_parameter"
+}
+```
+
+### 7. Get OAuth User Info
+
+```bash
+# Get OAuth user information (requires OAuth JWT token)
+curl -X GET "http://localhost:8000/auth/user" \
+     -H "Authorization: Bearer oauth_jwt_token..."
+```
+
+**Response:**
+```json
+{
+  "github_id": 123456,
+  "username": "octocat",
+  "display_name": "The Octocat",
+  "email": "octocat@github.com",
+  "avatar_url": "https://avatars.githubusercontent.com/u/583231",
+  "profile_url": "https://github.com/octocat",
+  "provider": "github",
+  "created_at": "2023-01-01T00:00:00",
+  "last_login": "2023-01-01T00:00:00"
+}
+```
+
 ## API Endpoints
 
-| Method | Endpoint     | Description                        | Authentication |
-|--------|-------------|------------------------------------|--------------  |
-| GET    | `/`         | Root endpoint                      | None           |
-| GET    | `/health`   | Health check                       | None           |
-| GET    | `/public`   | Public route example               | None           |
-| POST   | `/login`    | Login and get JWT tokens           | None           |
-| POST   | `/refresh`  | Refresh access token               | Refresh Token  |
-| GET    | `/protected`| Protected route example            | JWT Required   |
-| GET    | `/me`       | Get current user info              | JWT Required   |
-| POST   | `/logout`   | Logout and blacklist tokens        | JWT Required   |
+| Method | Endpoint                    | Description                        | Authentication |
+|--------|----------------------------|------------------------------------|--------------  |
+| GET    | `/`                        | Root endpoint                      | None           |
+| GET    | `/health`                  | Health check                       | None           |
+| GET    | `/public`                  | Public route example               | None           |
+| POST   | `/login`                   | Login and get JWT tokens           | None           |
+| POST   | `/refresh`                 | Refresh access token               | Refresh Token  |
+| GET    | `/protected`               | Protected route example            | JWT Required   |
+| GET    | `/me`                      | Get current user info              | JWT Required   |
+| POST   | `/logout`                  | Logout and blacklist tokens        | JWT Required   |
+| GET    | `/auth/github`             | Get GitHub OAuth URL               | None           |
+| GET    | `/auth/github/redirect`    | Direct redirect to GitHub OAuth    | None           |
+| GET    | `/auth/github/callback`    | GitHub OAuth callback handler      | None           |
+| GET    | `/auth/user`               | Get OAuth user information         | JWT Required   |
 
 ## Token System Architecture
 
@@ -376,6 +436,7 @@ Client                    Server
 For detailed information about JWT authentication implementation, see:
 
 - **[JWT Token Authentication in FastAPI](docs/jwt_auth_explained.md)** - Complete bilingual documentation with implementation details, security considerations, and production deployment guide
+- **[GitHub OAuth 2.0 Authentication](docs/oauth_github_auth.md)** - Complete OAuth 2.0 implementation guide with GitHub integration
 - [FastAPI Security Documentation](https://fastapi.tiangolo.com/tutorial/security/)
 - [JWT.io](https://jwt.io/) - Learn more about JSON Web Tokens
 
@@ -389,20 +450,23 @@ For detailed information about JWT authentication implementation, see:
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+This project is licensed under the MIT License - see the LICENSE file for details. 
 
 ---
 
 # FastAPI JWT Token Аутентификация
 
-Комплексный пример реализации JWT (JSON Web Token) аутентификации в FastAPI с Python, включая функциональность refresh токенов.
+Комплексный пример реализации JWT (JSON Web Token) аутентификации в FastAPI с Python, включая функциональность refresh токенов и интеграцию GitHub OAuth 2.0.
 
 ## Возможности
 
 - **JWT Token Аутентификация**: Безопасная токен-ориентированная аутентификация с использованием PyJWT
 - **Система Refresh токенов**: Долгоживущие refresh токены для бесшовного пользовательского опыта
+- **GitHub OAuth 2.0**: Полная интеграция OAuth с аутентификацией GitHub
+- **Двухфакторная Аутентификация**: Оба метода входа по имени пользователя/паролю и OAuth
 - **Блэклист токенов**: Безопасная функция выхода с отзывом токенов
 - **Защищенные маршруты**: Безопасные эндпоинты, требующие действительные JWT токены
+- **Управление пользователями OAuth**: Автоматическое создание пользователя GitHub и синхронизация профиля
 - **Автоматическая очистка токенов**: Предотвращает утечки памяти от истекших токенов
 - **Комплексное тестирование**: Полный набор тестов с pytest и паттернами фикстур
 - **Готовность к продакшену**: Переменные окружения, обработка ошибок и лучшие практики безопасности
@@ -424,7 +488,22 @@ poetry install
 export API_USERNAME="admin"
 export API_PASSWORD="password"
 export JWT_SECRET_KEY="your-super-secret-jwt-key"
+
+# Для GitHub OAuth (необязательно)
+export GITHUB_CLIENT_ID="your_github_client_id"
+export GITHUB_CLIENT_SECRET="your_github_client_secret"
+export GITHUB_REDIRECT_URI="http://localhost:8000/auth/github/callback"
 ```
+
+### GitHub OAuth Setup (Необязательно)
+
+1. Перейдите в [GitHub Developer Settings](https://github.com/settings/developers)
+2. Нажмите "New OAuth App"
+3. Заполните детали:
+   - Название приложения: Название вашего приложения
+   - URL домашней страницы: `http://localhost:8000`
+   - URL обратного вызова авторизации: `http://localhost:8000/auth/github/callback`
+4. Сохраните Client ID и Client Secret
 
 ### Запуск приложения
 
@@ -545,18 +624,60 @@ curl -X POST "http://localhost:8000/logout" \
 }
 ```
 
+### 6. GitHub OAuth Login
+
+```bash
+# Get GitHub OAuth authorization URL
+curl -X GET "http://localhost:8000/auth/github"
+```
+
+**Response:**
+```json
+{
+  "auth_url": "https://github.com/login/oauth/authorize?client_id=...",
+  "state": "optional_state_parameter"
+}
+```
+
+### 7. Get OAuth User Info
+
+```bash
+# Get OAuth user information (requires OAuth JWT token)
+curl -X GET "http://localhost:8000/auth/user" \
+     -H "Authorization: Bearer oauth_jwt_token..."
+```
+
+**Response:**
+```json
+{
+  "github_id": 123456,
+  "username": "octocat",
+  "display_name": "The Octocat",
+  "email": "octocat@github.com",
+  "avatar_url": "https://avatars.githubusercontent.com/u/583231",
+  "profile_url": "https://github.com/octocat",
+  "provider": "github",
+  "created_at": "2023-01-01T00:00:00",
+  "last_login": "2023-01-01T00:00:00"
+}
+```
+
 ## API Эндпоинты
 
-| Метод  | Эндпоинт     | Описание                           | Аутентификация |
-|--------|-------------|------------------------------------|--------------  |
-| GET    | `/`         | Корневой эндпоинт                  | Нет            |
-| GET    | `/health`   | Проверка состояния                 | Нет            |
-| GET    | `/public`   | Пример публичного маршрута         | Нет            |
-| POST   | `/login`    | Вход и получение JWT токенов       | Нет            |
-| POST   | `/refresh`  | Обновление access токена           | Refresh Token  |
-| GET    | `/protected`| Пример защищенного маршрута        | JWT обязателен |
-| GET    | `/me`       | Получение информации о пользователе| JWT обязателен |
-| POST   | `/logout`   | Выход и блэклист токенов           | JWT обязателен |
+| Метод  | Эндпоинт                    | Описание                            | Аутентификация |
+|--------|----------------------------|-------------------------------------|--------------  |
+| GET    | `/`                        | Корневой эндпоинт                   | Нет            |
+| GET    | `/health`                  | Проверка состояния                  | Нет            |
+| GET    | `/public`                  | Пример публичного маршрута          | Нет            |
+| POST   | `/login`                   | Вход и получение JWT токенов        | Нет            |
+| POST   | `/refresh`                 | Обновление access токена            | Refresh Token  |
+| GET    | `/protected`               | Пример защищенного маршрута         | JWT обязателен |
+| GET    | `/me`                      | Получение информации о пользователе | JWT обязателен |
+| POST   | `/logout`                  | Выход и блэклист токенов            | JWT обязателен |
+| GET    | `/auth/github`             | Get GitHub OAuth URL                | None           |
+| GET    | `/auth/github/redirect`    | Перенаправление на GitHub OAuth     | None           |
+| GET    | `/auth/github/callback`    | GitHub OAuth callback ручка         | None           |
+| GET    | `/auth/user`               | Получить OAuth инфо о пользователе  | JWT обязателен |
 
 ## Архитектура системы токенов
 
@@ -666,5 +787,6 @@ app.add_middleware(
 Для подробной информации о реализации JWT аутентификации, смотрите:
 
 - **[JWT Token Authentication in FastAPI](docs/jwt_auth_explained.md)** - Полная двуязычная документация с деталями реализации, соображениями безопасности и руководством по развертыванию в продакшене
+- **[GitHub OAuth 2.0 Authentication](docs/oauth_github_auth.md)** - Полная OAuth 2.0 реализация руководства с интеграцией GitHub
 - [Документация безопасности FastAPI](https://fastapi.tiangolo.com/tutorial/security/)
 - [JWT.io](https://jwt.io/) - Узнайте больше о JSON Web Tokens 
