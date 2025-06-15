@@ -1,19 +1,25 @@
-# FastAPI JWT Token Authentication
+# FastAPI Keycloak Authentication
 
-A comprehensive example of implementing JWT (JSON Web Token) authentication in FastAPI with Python, including refresh token functionality.
+A comprehensive example of implementing Keycloak authentication in FastAPI with Python, including Docker support and in-memory data storage.
 
 ## Features
 
-- **JWT Token Authentication**: Secure token-based authentication using PyJWT
-- **Refresh Token System**: Long-lived refresh tokens for seamless user experience
-- **Token Blacklisting**: Secure logout functionality with token revocation
-- **Protected Routes**: Secure endpoints requiring valid JWT tokens
-- **Automatic Token Cleanup**: Prevents memory leaks from expired tokens
-- **Comprehensive Testing**: Full test suite with pytest and fixture patterns
+- **Keycloak Integration**: Secure authentication using Keycloak OpenID Connect
+- **In-Memory Storage**: Simple dictionary-based storage for development
+- **Docker Support**: Complete Docker and docker-compose setup
+- **Protected Routes**: Secure endpoints requiring valid Keycloak tokens
+- **User Management**: Store and manage user information in memory
+- **Session Management**: Track user sessions with token validation
+- **Comprehensive Testing**: Full test suite with pytest and Keycloak mocking
 - **Production Ready**: Environment variables, error handling, and security best practices
-- **Bilingual Documentation**: Complete guides in English and Russian
 
 ## Quick Start
+
+### Prerequisites
+
+- Docker and Docker Compose
+- Python 3.11+ (for development)
+- Git
 
 ### Installation
 
@@ -22,40 +28,66 @@ A comprehensive example of implementing JWT (JSON Web Token) authentication in F
 git clone <repository-url>
 cd authorization_types
 
-# Install dependencies using Poetry
-poetry install
+# Make the startup script executable
+chmod +x scripts/start.sh
 
-# Set environment variables (optional - defaults provided)
-export API_USERNAME="admin"
-export API_PASSWORD="password"
-export JWT_SECRET_KEY="your-super-secret-jwt-key"
+# Start the entire application stack
+./scripts/start.sh
 ```
 
-### Running the Application
+### Manual Setup (Alternative)
 
 ```bash
-# Start the development server
-poetry run uvicorn app.main:app --reload
+# Start services with docker-compose
+docker-compose up -d
+
+# Initialize Keycloak (after Keycloak is ready)
+python3 scripts/init_keycloak.py
 
 # The API will be available at:
 # - Main app: http://localhost:8000
 # - Interactive docs: http://localhost:8000/docs
-# - Alternative docs: http://localhost:8000/redoc
+# - Keycloak console: http://localhost:8080
 ```
 
-### Running Tests
+### Development Setup
 
 ```bash
-# Run all tests
-poetry run pytest
+# Install dependencies using pip
+pip install -e .
 
-# Run tests with verbose output
-poetry run pytest -v
+# Set environment variables (optional - defaults provided)
+export KEYCLOAK_SERVER_URL="http://localhost:8080"
+export KEYCLOAK_REALM="master"
+export KEYCLOAK_CLIENT_ID="fastapi-app"
+export KEYCLOAK_CLIENT_SECRET="your-client-secret"
+
+# Run the development server
+uvicorn app.main:app --reload
 ```
+
+## Docker Configuration
+
+The application uses a multi-service Docker setup:
+
+### Services
+
+- **app**: FastAPI application
+- **keycloak**: Keycloak authentication server (with embedded H2 database)
+
+### Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `KEYCLOAK_SERVER_URL` | Keycloak server URL | `http://localhost:8080` |
+| `KEYCLOAK_REALM` | Keycloak realm name | `master` |
+| `KEYCLOAK_CLIENT_ID` | Keycloak client ID | `fastapi-app` |
+| `KEYCLOAK_CLIENT_SECRET` | Keycloak client secret | `your-client-secret` |
+| `DEBUG` | Enable debug mode | `False` |
 
 ## API Usage Examples
 
-### 1. Login to Get JWT Tokens
+### 1. Login to Get Keycloak Token
 
 ```bash
 curl -X POST "http://localhost:8000/login" \
@@ -69,8 +101,7 @@ curl -X POST "http://localhost:8000/login" \
 **Response:**
 ```json
 {
-  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-  "refresh_token": "a3B9d2F5c3RyaW5nX3JhbmRvbV92YWx1ZQ",
+  "access_token": "eyJhbGciOiJSUzI1NiIsInR5cCIgOiAiSldUIiwia2lkIiA6ICJf...",
   "token_type": "bearer",
   "username": "admin",
   "message": "Login successful"
@@ -81,167 +112,131 @@ curl -X POST "http://localhost:8000/login" \
 
 ```bash
 curl -X GET "http://localhost:8000/protected" \
-     -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+     -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
 ```
 
 **Response:**
 ```json
 {
   "message": "This is a protected route",
-  "data": "secret information accessible with JWT token",
+  "data": "secret information accessible with Keycloak token",
   "authenticated_user": "admin"
 }
 ```
 
-### 3. Refresh Access Token
-
-```bash
-curl -X POST "http://localhost:8000/refresh" \
-     -H "Content-Type: application/json" \
-     -d '{
-       "refresh_token": "a3B9d2F5c3RyaW5nX3JhbmRvbV92YWx1ZQ"
-     }'
-```
-
-**Response:**
-```json
-{
-  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-  "token_type": "bearer",
-  "message": "Token refreshed successfully"
-}
-```
-
-### 4. Get User Information
+### 3. Get User Information
 
 ```bash
 curl -X GET "http://localhost:8000/me" \
-     -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+     -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
 ```
 
 **Response:**
 ```json
 {
   "username": "admin",
+  "user_data": {
+    "username": "admin",
+    "email": "admin@example.com",
+    "keycloak_id": "user-id-from-keycloak",
+    "roles": ["user", "admin"],
+    "created_at": "2023-01-01T00:00:00"
+  },
   "message": "User information retrieved successfully"
 }
 ```
 
-### 5. Logout (Blacklist Tokens)
+### 4. Logout
 
 ```bash
-# Logout with only access token
 curl -X POST "http://localhost:8000/logout" \
-     -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-
-# Logout with both access and refresh tokens
-curl -X POST "http://localhost:8000/logout" \
-     -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." \
-     -H "Content-Type: application/json" \
-     -d '{
-       "refresh_token": "a3B9d2F5c3RyaW5nX3JhbmRvbV92YWx1ZQ"
-     }'
+     -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
 ```
 
-**Response:**
-```json
-{
-  "message": "Logout successful"
-}
+## Testing
+
+### Running Tests
+
+```bash
+# Run all tests
+pytest
+
+# Run tests with verbose output
+pytest -v
+
+# Run specific test file
+pytest tests/test_auth_handlers.py
+
+# Run with coverage
+pytest --cov=app tests/
 ```
 
-## API Endpoints
+### Test Structure
 
-| Method | Endpoint     | Description                        | Authentication |
-|--------|-------------|------------------------------------|--------------  |
-| GET    | `/`         | Root endpoint                      | None           |
-| GET    | `/health`   | Health check                       | None           |
-| GET    | `/public`   | Public route example               | None           |
-| POST   | `/login`    | Login and get JWT tokens           | None           |
-| POST   | `/refresh`  | Refresh access token               | Refresh Token  |
-| GET    | `/protected`| Protected route example            | JWT Required   |
-| GET    | `/me`       | Get current user info              | JWT Required   |
-| POST   | `/logout`   | Logout and blacklist tokens        | JWT Required   |
+The test suite includes:
 
-## Token System Architecture
+- **Authentication flow**: Login, token validation, logout
+- **Protected routes**: Testing with valid/invalid tokens
+- **User management**: Database operations and user info
+- **Error scenarios**: Invalid credentials, expired tokens
+- **Keycloak integration**: Mocked Keycloak responses
 
-### Access Tokens
-- **Purpose**: Short-lived tokens for API access
-- **Lifetime**: 30 minutes (default)
-- **Format**: JWT with signature verification
-- **Storage**: Client-side (localStorage, memory, etc.)
+## Architecture
 
-### Refresh Tokens
-- **Purpose**: Long-lived tokens for obtaining new access tokens
-- **Lifetime**: 7 days (default)
-- **Format**: Random secure string
-- **Storage**: Server-side store + client-side secure storage
+### Components
 
-### Token Structure
+1. **FastAPI Application** (`app/main.py`)
+   - API endpoints and request handling
+   - Authentication middleware integration
+   - Error handling and response formatting
 
-**Access Token (JWT):**
-```json
-{
-  "sub": "admin",                    // Subject (username)
-  "exp": 1707324865,                 // Expiration timestamp
-  "iat": 1707323065,                 // Issued at timestamp
-  "jti": "random-unique-identifier", // JWT ID for token tracking
-  "type": "access"                   // Token type
-}
-```
+2. **Keycloak Integration** (`app/keycloak/`)
+   - Keycloak client for authentication operations
+   - Token validation and user info retrieval
+   - Authentication dependencies for protected routes
 
-**Refresh Token:**
-- Cryptographically secure random string
-- Stored server-side with expiration info
-- Not a JWT (prevents token parsing attacks)
+3. **In-Memory Storage** (`app/database/`)
+   - Dictionary-based in-memory storage for development
+   - User and session data models
+   - Thread-safe database operations
 
-## Configuration
+4. **Configuration** (`app/config.py`)
+   - Environment-based configuration management
+   - Keycloak connection settings
+   - Application-wide settings
 
-### Environment Variables
+### Authentication Flow
 
-| Variable                | Description                     | Default      |
-|-------------------------|---------------------------------|--------------|
-| `API_USERNAME`          | Username for authentication     | `admin`      |
-| `API_PASSWORD`          | Password for authentication     | `password`   |
-| `JWT_SECRET_KEY`        | Secret key for JWT signing      | Auto-generated |
-| `DEBUG`                 | Enable debug mode               | `True`       |
-| `ACCESS_EXPIRE_MINUTES` | Living time of access token'а   | 30           |
-| `REFRESH_EXPIRE_DAYS`   | Living time of refresh token'а  | 7            |
-
-
-### Token Configuration
-
-- **Access Token Expiration**: 30 minutes (default)
-- **Refresh Token Expiration**: 7 days (default)
-- **Algorithm**: HS256
-- **Token Type**: Bearer
-- **Automatic Cleanup**: Removes expired tokens from memory
+1. User submits credentials to `/login`
+2. FastAPI forwards credentials to Keycloak
+3. Keycloak validates and returns access token
+4. FastAPI stores user info in memory
+5. Client uses access token for protected routes
+6. FastAPI validates token with Keycloak on each request
+7. User sessions are tracked in memory for quick access
 
 ## Security Features
 
-### 1. Secure Password Comparison
-Uses `secrets.compare_digest()` to prevent timing attacks:
+### 1. Keycloak Integration
+- Industry-standard OpenID Connect authentication
+- Centralized user management and security policies
+- Token-based authentication with automatic expiration
+- Support for multi-factor authentication (configured in Keycloak)
 
-```python
-def validate_credentials(username: str, password: str) -> bool:
-    return (secrets.compare_digest(username, settings.API_USERNAME) and 
-            secrets.compare_digest(password, settings.API_PASSWORD))
-```
+### 2. Token Security
+- JWT tokens with digital signatures
+- Automatic token expiration handling
+- Secure token transmission over HTTPS (in production)
+- Token validation on every protected request
 
-### 2. JWT Token Security
-- Strong secret key generation
-- Token expiration validation
-- Access token blacklisting for logout
-- Unique JWT ID (jti) for each token
-- Token type identification
+### 3. Local Data Protection
+- Thread-safe database operations
+- In-memory data storage (no file I/O)
+- Session tracking with automatic cleanup
+- Minimal data storage (only essential user info)
 
-### 3. Refresh Token Security
-- Cryptographically secure random generation
-- Server-side storage and validation
-- Automatic expiration and cleanup
-- Immediate revocation on logout
+### 4. Production Recommendations
 
-### 4. HTTPS Recommendations
 For production deployment:
 
 ```python
@@ -254,417 +249,111 @@ app.add_middleware(
 )
 ```
 
-## Testing
+- Use HTTPS for all communications
+- Configure proper CORS policies
+- Set up Keycloak with SSL/TLS
+- Use a proper database (PostgreSQL, MySQL) instead of in-memory storage
+- Implement proper logging and monitoring
+- Set up Keycloak realm-specific configuration
 
-### Test Structure
+## Keycloak Configuration
 
-The test suite includes:
+### Default Setup
 
-- **Public endpoints**: Testing routes without authentication
-- **JWT authentication flow**: Login, token validation, logout
-- **Refresh token flow**: Token refresh, expiration, invalid tokens
-- **Protected routes**: Testing with valid/invalid tokens
-- **Error scenarios**: Malformed headers, expired tokens
-- **Token management**: Blacklisting and cleanup functionality
+The initialization script creates:
 
-### Example Tests
+- **Realm**: `master` (using default)
+- **Client**: `fastapi-app` with client credentials
+- **Users**: `admin` and `testuser` with password `password`
 
-```python
-def test_refresh_token_flow_integration(client):
-    """Test complete refresh token flow integration."""
-    # 1. Login and get both tokens
-    login_response = client.post("/login", json={"username": "admin", "password": "password"})
-    tokens = login_response.json()
-    
-    # 2. Use access token
-    auth_headers = {"Authorization": f"Bearer {tokens['access_token']}"}
-    response = client.get("/protected", headers=auth_headers)
-    assert response.status_code == 200
-    
-    # 3. Refresh access token
-    refresh_response = client.post("/refresh", json={"refresh_token": tokens["refresh_token"]})
-    new_token = refresh_response.json()["access_token"]
-    
-    # 4. Use new token
-    new_headers = {"Authorization": f"Bearer {new_token}"}
-    response = client.get("/protected", headers=new_headers)
-    assert response.status_code == 200
-```
+### Manual Configuration
 
-### Test Fixtures
+1. Access Keycloak Admin Console: http://localhost:8080
+2. Login with `admin` / `admin123`
+3. Configure realm settings, clients, and users as needed
+4. Update environment variables to match your configuration
 
-```python
-@pytest.fixture
-def refresh_token(login_user):
-    """Get refresh token from login response."""
-    return login_user.json()["refresh_token"]
-```
+### Client Configuration
 
-## Architecture
+The FastAPI client is configured with:
+- **Client ID**: `fastapi-app`
+- **Access Type**: Confidential
+- **Direct Access Grants**: Enabled (for username/password login)
+- **Service Accounts**: Enabled
+- **Valid Redirect URIs**: `http://localhost:8000/*`
 
-### File Structure
+## Development
+
+### Project Structure
 
 ```
 authorization_types/
 ├── app/
-│   ├── __init__.py
-│   ├── main.py          # FastAPI application and routes
-│   ├── auth.py          # JWT authentication logic
-│   ├── config.py        # Configuration settings
-│   └── models.py        # Pydantic models
-├── tests/
-│   ├── __init__.py
-│   ├── conftest.py      # Test fixtures
-│   └── test_auth_handlers.py  # Authentication tests
-├── docs/
-│   └── jwt_auth_explained.md   # Detailed documentation
-├── pyproject.toml       # Project dependencies
-└── README.md           # This file
+│   ├── keycloak/           # Keycloak integration
+│   ├── database/           # In-memory storage
+│   ├── main.py            # FastAPI application
+│   ├── config.py          # Configuration
+│   ├── models.py          # Data models
+│   └── auth.py            # Legacy auth (minimal)
+├── tests/                 # Test suite
+├── scripts/               # Utility scripts
+├── docker-compose.yml     # Docker services
+├── Dockerfile            # Application container
+└── README.md
 ```
 
-### Dependencies
-
-- **FastAPI**: Modern Python web framework
-- **PyJWT**: JSON Web Token implementation
-- **Pydantic**: Data validation using Python type annotations
-- **Uvicorn**: ASGI server for running FastAPI
-- **Pytest**: Testing framework
-
-## Token Flow Diagrams
-
-### Login Flow
-```
-Client                    Server
-  |                        |
-  |--- POST /login ------>|
-  |<-- access_token ------|
-  |<-- refresh_token -----|
-```
-
-### Refresh Flow
-```
-Client                    Server
-  |                        |
-  |--- POST /refresh ---->| (with refresh_token)
-  |<-- new access_token --|
-```
-
-### Logout Flow
-```
-Client                    Server
-  |                        |
-  |--- POST /logout ----->| (with access_token + refresh_token)
-  |                       | - Blacklist access_token
-  |                       | - Delete refresh_token
-  |<-- logout success ----|
-```
-
-## Comparison: JWT vs Session Authentication
-
-| Feature              | JWT + Refresh Tokens       | Session Cookies           |
-|---------------------|----------------------------|-----------------------------|
-| **Storage**         | Client + Server hybrid     | Server-side sessions        |
-| **Scalability**     | Excellent (stateless access)| Requires session store     |
-| **Security**        | Revokable + short-lived     | Server-controlled           |
-| **Expiration**      | Dual-layer expiration       | Server-managed TTL          |
-| **Cross-domain**    | Easy with headers           | Requires CORS setup         |
-| **Mobile apps**     | Native support              | Requires special handling   |
-| **Token refresh**   | Built-in refresh mechanism  | Session extension           |
-
-## Documentation
-
-For detailed information about JWT authentication implementation, see:
-
-- **[JWT Token Authentication in FastAPI](docs/jwt_auth_explained.md)** - Complete bilingual documentation with implementation details, security considerations, and production deployment guide
-- [FastAPI Security Documentation](https://fastapi.tiangolo.com/tutorial/security/)
-- [JWT.io](https://jwt.io/) - Learn more about JSON Web Tokens
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
----
-
-# FastAPI JWT Token Аутентификация
-
-Комплексный пример реализации JWT (JSON Web Token) аутентификации в FastAPI с Python, включая функциональность refresh токенов.
-
-## Возможности
-
-- **JWT Token Аутентификация**: Безопасная токен-ориентированная аутентификация с использованием PyJWT
-- **Система Refresh токенов**: Долгоживущие refresh токены для бесшовного пользовательского опыта
-- **Блэклист токенов**: Безопасная функция выхода с отзывом токенов
-- **Защищенные маршруты**: Безопасные эндпоинты, требующие действительные JWT токены
-- **Автоматическая очистка токенов**: Предотвращает утечки памяти от истекших токенов
-- **Комплексное тестирование**: Полный набор тестов с pytest и паттернами фикстур
-- **Готовность к продакшену**: Переменные окружения, обработка ошибок и лучшие практики безопасности
-- **Двуязычная документация**: Полные руководства на английском и русском языках
-
-## Быстрый старт
-
-### Установка
-
-```bash
-# Клонируйте репозиторий
-git clone <repository-url>
-cd authorization_types
-
-# Установите зависимости с помощью Poetry
-poetry install
-
-# Установите переменные окружения (необязательно - предоставлены значения по умолчанию)
-export API_USERNAME="admin"
-export API_PASSWORD="password"
-export JWT_SECRET_KEY="your-super-secret-jwt-key"
-```
-
-### Запуск приложения
-
-```bash
-# Запустите сервер разработки
-poetry run uvicorn app.main:app --reload
-
-# API будет доступен по адресу:
-# - Основное приложение: http://localhost:8000
-# - Интерактивная документация: http://localhost:8000/docs
-# - Альтернативная документация: http://localhost:8000/redoc
-```
-
-### Запуск тестов
-
-```bash
-# Запустить все тесты
-poetry run pytest
-
-# Запустить тесты с подробным выводом
-poetry run pytest -v
-```
-
-## Примеры использования API
-
-### 1. Вход для получения JWT токенов
-
-```bash
-curl -X POST "http://localhost:8000/login" \
-     -H "Content-Type: application/json" \
-     -d '{
-       "username": "admin",
-       "password": "password"
-     }'
-```
-
-**Ответ:**
-```json
-{
-  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-  "refresh_token": "a3B9d2F5c3RyaW5nX3JhbmRvbV92YWx1ZQ",
-  "token_type": "bearer",
-  "username": "admin",
-  "message": "Login successful"
-}
-```
-
-### 2. Доступ к защищенному маршруту
-
-```bash
-curl -X GET "http://localhost:8000/protected" \
-     -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-```
-
-**Ответ:**
-```json
-{
-  "message": "This is a protected route",
-  "data": "secret information accessible with JWT token",
-  "authenticated_user": "admin"
-}
-```
-
-### 3. Обновление access токена
-
-```bash
-curl -X POST "http://localhost:8000/refresh" \
-     -H "Content-Type: application/json" \
-     -d '{
-       "refresh_token": "a3B9d2F5c3RyaW5nX3JhbmRvbV92YWx1ZQ"
-     }'
-```
-
-**Ответ:**
-```json
-{
-  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-  "token_type": "bearer",
-  "message": "Token refreshed successfully"
-}
-```
-
-### 4. Получение информации о пользователе
-
-```bash
-curl -X GET "http://localhost:8000/me" \
-     -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-```
-
-**Ответ:**
-```json
-{
-  "username": "admin",
-  "message": "User information retrieved successfully"
-}
-```
-
-### 5. Выход (блэклист токенов)
-
-```bash
-# Выход только с access токеном
-curl -X POST "http://localhost:8000/logout" \
-     -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-
-# Выход с обоими токенами
-curl -X POST "http://localhost:8000/logout" \
-     -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." \
-     -H "Content-Type: application/json" \
-     -d '{
-       "refresh_token": "a3B9d2F5c3RyaW5nX3JhbmRvbV92YWx1ZQ"
-     }'
-```
-
-**Ответ:**
-```json
-{
-  "message": "Logout successful"
-}
-```
-
-## API Эндпоинты
-
-| Метод  | Эндпоинт     | Описание                           | Аутентификация |
-|--------|-------------|------------------------------------|--------------  |
-| GET    | `/`         | Корневой эндпоинт                  | Нет            |
-| GET    | `/health`   | Проверка состояния                 | Нет            |
-| GET    | `/public`   | Пример публичного маршрута         | Нет            |
-| POST   | `/login`    | Вход и получение JWT токенов       | Нет            |
-| POST   | `/refresh`  | Обновление access токена           | Refresh Token  |
-| GET    | `/protected`| Пример защищенного маршрута        | JWT обязателен |
-| GET    | `/me`       | Получение информации о пользователе| JWT обязателен |
-| POST   | `/logout`   | Выход и блэклист токенов           | JWT обязателен |
-
-## Архитектура системы токенов
-
-### Access токены
-- **Назначение**: Короткоживущие токены для доступа к API
-- **Время жизни**: 30 минут (по умолчанию)
-- **Формат**: JWT с проверкой подписи
-- **Хранение**: Клиентская сторона (localStorage, память и т.д.)
-
-### Refresh токены
-- **Назначение**: Долгоживущие токены для получения новых access токенов
-- **Время жизни**: 7 дней (по умолчанию)
-- **Формат**: Случайная безопасная строка
-- **Хранение**: Серверное хранилище + безопасное клиентское хранение
-
-### Структура токенов
-
-**Access Token (JWT):**
-```json
-{
-  "sub": "admin",                    // Субъект (имя пользователя)
-  "exp": 1707324865,                 // Временная метка истечения
-  "iat": 1707323065,                 // Временная метка выдачи
-  "jti": "random-unique-identifier", // JWT ID для отслеживания токенов
-  "type": "access"                   // Тип токена
-}
-```
-
-**Refresh Token:**
-- Криптографически защищенная случайная строка
-- Хранится на сервере с информацией об истечении
-- Не является JWT (предотвращает атаки парсинга токенов)
-
-## Конфигурация
-
-### Переменные окружения
-
-| Переменная              | Описание                           | По умолчанию  |
-|-------------------------|------------------------------------|---------------|
-| `API_USERNAME`          | Имя пользователя для аутентификации | `admin`       |
-| `API_PASSWORD`          | Пароль для аутентификации          | `password`    |
-| `JWT_SECRET_KEY`        | Секретный ключ для подписи JWT     | Автогенерация |
-| `DEBUG`                 | Включить режим отладки             | `True`        |
-| `ACCESS_EXPIRE_MINUTES` | Время жизни access token'а         | 30            |
-| `REFRESH_EXPIRE_DAYS`   | Время жизни refresh token'а        | 7             |
-
-### Конфигурация токенов
-
-- **Истечение Access токена**: 30 минут (по умолчанию)
-- **Истечение Refresh токена**: 7 дней (по умолчанию)
-- **Алгоритм**: HS256
-- **Тип токена**: Bearer
-- **Автоматическая очистка**: Удаляет истекшие токены из памяти
-
-## Функции безопасности
-
-### 1. Безопасное сравнение паролей
-Использует `secrets.compare_digest()` для предотвращения атак по времени:
-
-```python
-def validate_credentials(username: str, password: str) -> bool:
-    return (secrets.compare_digest(username, settings.API_USERNAME) and 
-            secrets.compare_digest(password, settings.API_PASSWORD))
-```
-
-### 2. Безопасность JWT токенов
-- Генерация сильного секретного ключа
-- Валидация истечения токена
-- Блэклист access токенов для выхода
-- Уникальный JWT ID (jti) для каждого токена
-- Идентификация типа токена
-
-### 3. Безопасность Refresh токенов
-- Криптографически безопасная случайная генерация
-- Серверное хранение и валидация
-- Автоматическое истечение и очистка
-- Немедленный отзыв при выходе
-
-### 4. Рекомендации HTTPS
-Для развертывания в продакшене:
-
-```python
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["https://yourdomain.com"],  # Укажите точные домены
-    allow_credentials=True,
-    allow_methods=["GET", "POST"],
-    allow_headers=["Authorization", "Content-Type"],
-)
-```
-
-## Тестирование
-
-### Структура тестов
-
-Набор тестов включает:
-
-- **Публичные эндпоинты**: Тестирование маршрутов без аутентификации
-- **Поток JWT аутентификации**: Вход, валидация токена, выход
-- **Поток Refresh токенов**: Обновление токена, истечение, недействительные токены
-- **Защищенные маршруты**: Тестирование с действительными/недействительными токенами
-- **Сценарии ошибок**: Неправильные заголовки, истекшие токены
-- **Управление токенами**: Блэклист и функциональность очистки
-
-## Документация
-
-Для подробной информации о реализации JWT аутентификации, смотрите:
-
-- **[JWT Token Authentication in FastAPI](docs/jwt_auth_explained.md)** - Полная двуязычная документация с деталями реализации, соображениями безопасности и руководством по развертыванию в продакшене
-- [Документация безопасности FastAPI](https://fastapi.tiangolo.com/tutorial/security/)
-- [JWT.io](https://jwt.io/) - Узнайте больше о JSON Web Tokens 
+### Adding New Features
+
+1. **New Endpoints**: Add to `app/main.py`
+2. **Authentication**: Use `get_current_user_keycloak` dependency
+3. **User Data**: Store/retrieve from local database
+4. **Configuration**: Add to `app/config.py`
+5. **Tests**: Add corresponding tests in `tests/`
+
+## Troubleshooting
+
+### Common Issues
+
+1. **Keycloak Connection Error**
+   ```bash
+   # Check if Keycloak is running
+   curl http://localhost:8080/health
+   
+   # Check container logs
+   docker-compose logs keycloak
+   ```
+
+2. **Authentication Failures**
+   - Verify client configuration in Keycloak
+   - Check client secret matches environment variable
+   - Ensure users exist and are enabled
+
+3. **Token Validation Errors**
+   - Check token expiration
+   - Verify Keycloak realm and client settings
+   - Ensure network connectivity to Keycloak
+
+4. **Database Issues**
+   - Memory is cleared on application restart
+   - Check for memory usage in long-running applications
+   - For production, use persistent database storage
+
+### Getting Help
+
+- Check application logs: `docker-compose logs app`
+- Check Keycloak logs: `docker-compose logs keycloak`
+- Verify configuration: Review environment variables
+- Test endpoints: Use the interactive docs at `/docs`
+
+## Migration from JWT
+
+This project replaces a previous JWT-based authentication system with Keycloak integration. Key changes:
+
+- **Removed**: Custom JWT token generation and validation
+- **Removed**: Refresh token management
+- **Added**: Keycloak OpenID Connect integration
+- **Added**: Docker and docker-compose setup
+- **Added**: Local database for user data
+- **Improved**: Security through industry-standard authentication
+
+The API endpoints remain largely the same for compatibility, but now use Keycloak for authentication instead of custom JWT tokens. 

@@ -1,4 +1,6 @@
 from pydantic import BaseModel
+from typing import Optional, List
+from datetime import datetime
 
 
 class ErrorMessage(BaseModel):
@@ -15,24 +17,32 @@ class LoginRequest(BaseModel):
 
 
 class LoginResponse(BaseModel):
-    """Login response model with both access and refresh tokens."""
+    """Login response model with access token."""
 
     access_token: str
-    refresh_token: str
     token_type: str = "bearer"
     username: str
     message: str = "Login successful"
 
 
-class RefreshTokenRequest(BaseModel):
-    """Refresh token request model."""
+class KeycloakUser(BaseModel):
+    """Keycloak user model."""
 
-    refresh_token: str
+    keycloak_id: str
+    username: str
+    email: Optional[str] = None
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    roles: List[str] = []
+    enabled: bool = True
 
 
-class RefreshTokenResponse(BaseModel):
-    """Refresh token response model with new access token."""
+class KeycloakTokenResponse(BaseModel):
+    """Keycloak token response model."""
 
     access_token: str
-    token_type: str = "bearer"
-    message: str = "Token refreshed successfully"
+    expires_in: int
+    refresh_expires_in: int
+    token_type: str
+    not_before_policy: int
+    scope: str

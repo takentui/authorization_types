@@ -1,0 +1,31 @@
+version: '3.8'
+
+services:
+  keycloak:
+    image: quay.io/keycloak/keycloak:23.0.0
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin123
+    ports:
+      - "8080:8080"
+    command: start-dev
+    networks:
+      - keycloak-network
+
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - KEYCLOAK_SERVER_URL=http://keycloak:8080
+      - KEYCLOAK_REALM=master
+      - KEYCLOAK_CLIENT_ID=fastapi-app
+      - KEYCLOAK_CLIENT_SECRET=your-client-secret
+    depends_on:
+      - keycloak
+    networks:
+      - keycloak-network
+
+networks:
+  keycloak-network:
+    driver: bridge 
