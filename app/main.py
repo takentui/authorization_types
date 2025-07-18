@@ -1,6 +1,7 @@
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.objects import router
 from app.auth import get_current_user
 from app.config import settings
 from app.models import ErrorMessage
@@ -21,6 +22,9 @@ app.add_middleware(
 )
 
 
+app.include_router(router)
+
+
 @app.get("/")
 async def root():
     """Root endpoint."""
@@ -32,10 +36,12 @@ async def health_check():
     """Health check endpoint."""
     return {"status": "healthy"}
 
+
 @app.get("/public")
 async def public_route():
     """Example public route accessible without authentication."""
     return {"message": "This is a public route", "data": "public information"}
+
 
 @app.get(
     "/protected",
@@ -45,14 +51,14 @@ async def public_route():
         200: {"description": "Successful response"},
         401: {
             "model": ErrorMessage,
-            "description": "Unauthorized: Invalid credentials"
-        }
-    }
+            "description": "Unauthorized: Invalid credentials",
+        },
+    },
 )
 async def protected_route(username: str = Depends(get_current_user)):
     """Protected route that requires basic authentication."""
     return {
         "message": "This is a protected route",
         "data": "secret information",
-        "authenticated_user": username
+        "authenticated_user": username,
     }

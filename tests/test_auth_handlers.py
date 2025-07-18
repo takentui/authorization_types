@@ -1,31 +1,7 @@
 import pytest
-import base64
 from fastapi import status
-from fastapi.testclient import TestClient
-from app.main import app
 
-BASE_URL = "http://localhost:8000"
-USERNAME = "admin"
-PASSWORD = "password"
-
-
-@pytest.fixture
-def client():
-    return TestClient(app)
-
-
-@pytest.fixture
-def auth_headers():
-    credentials = f"{USERNAME}:{PASSWORD}"
-    encoded = base64.b64encode(credentials.encode()).decode()
-    return {"Authorization": f"Basic {encoded}"}
-
-
-@pytest.fixture
-def invalid_auth_headers():
-    credentials = "wronguser:wrongpass"
-    encoded = base64.b64encode(credentials.encode()).decode()
-    return {"Authorization": f"Basic {encoded}"}
+USERNAME = "test_user"
 
 
 def test_root_endpoint(client):
@@ -76,11 +52,14 @@ def test_protected_endpoint_valid_auth(client, auth_headers):
     assert data["authenticated_user"] == USERNAME
 
 
-@pytest.mark.parametrize("malformed_header", [
-    {"Authorization": "Basic invalid-base64"},
-    {"Authorization": "NotBasic valid-base64"},
-    {"Authorization": "Bearer token"}
-])
+@pytest.mark.parametrize(
+    "malformed_header",
+    [
+        {"Authorization": "Basic invalid-base64"},
+        {"Authorization": "NotBasic valid-base64"},
+        {"Authorization": "Bearer token"},
+    ],
+)
 def test_protected_endpoint_malformed_auth(client, malformed_header):
     response = client.get("/protected", headers=malformed_header)
-    assert response.status_code == status.HTTP_401_UNAUTHORIZED 
+    assert response.status_code == status.HTTP_401_UNAUTHORIZED
