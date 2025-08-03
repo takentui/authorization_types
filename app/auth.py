@@ -3,9 +3,11 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import jwt
 import secrets
 from datetime import datetime, timedelta, timezone
-from typing import Optional, Dict
+from typing import Optional, Dict, Callable, Any, Awaitable, Coroutine
 
 from app.config import settings
+from app.db import UserFullModel, UserModel
+from app.service import get_user
 
 # Simple in-memory token blacklist store
 # In production, use Redis or a database
@@ -17,111 +19,158 @@ security = HTTPBearer()
 # Global secret key to ensure consistency
 _jwt_secret_key: Optional[str] = None
 
-def get_jwt_secret_key() -> str:
-    """Get JWT secret key from settings or generate a consistent one."""
-    global _jwt_secret_key
-    
-    # First, try to get from settings
-    if hasattr(settings, 'JWT_SECRET_KEY') and settings.JWT_SECRET_KEY:
-        return settings.JWT_SECRET_KEY
-    
-    # If not in settings, generate once and store globally
-    if _jwt_secret_key is None:
-        _jwt_secret_key = secrets.token_urlsafe(32)
-        print(f"Generated JWT secret key: {_jwt_secret_key}")  # For debugging
-    
-    return _jwt_secret_key
 
-def validate_credentials(username: str, password: str) -> bool:
-    """Validate user credentials.
-    
-    Using secrets.compare_digest() instead of regular string comparison (==)
-    provides protection against timing attacks. A timing attack is where
-    an attacker measures the time it takes to compare strings to determine
-    if they're getting closer to the correct value. The secrets module ensures
-    that the comparison takes the same amount of time regardless of how many
-    characters match, making the comparison resistant to timing attacks.
-    """
-    return (secrets.compare_digest(username, settings.API_USERNAME) and 
-            secrets.compare_digest(password, settings.API_PASSWORD))
-
-def create_jwt_token(username: str, expires_delta: Optional[timedelta] = None) -> str:
+def create_jwt_token(user: UserFullModel, is_remember_me: bool) -> str:
     """Create a JWT token for the user."""
-    if expires_delta:
-        expire = datetime.now(timezone.utc) + expires_delta
+    if is_remember_me:
+        expires_minutes = settings.JWT_EXPIRATION_REMEMBER_MINUTES
     else:
-        expire = datetime.now(timezone.utc) + timedelta(minutes=30)
-    
-    payload = {
-        "sub": username,  # Subject (user identifier)
-        "exp": int(expire.timestamp()),    # Expiration time as Unix timestamp
-        "iat": int(datetime.now(timezone.utc).timestamp()),  # Issued at as Unix timestamp
-        "jti": secrets.token_urlsafe(16)    # JWT ID (unique identifier)
-    }
-    
-    return jwt.encode(payload, get_jwt_secret_key(), algorithm="HS256")
+        expires_minutes = settings.JWT_EXPIRATION_DEFAULT_MINUTES
 
-def decode_jwt_token(token: str) -> Dict:
+    expire = datetime.now(timezone.utc) + timedelta(minutes=expires_minutes)
+
+    payload = {
+        "sub": user.username,  # Subject (user identifier)
+        "exp": int(expire.timestamp()),  # Expiration time as Unix timestamp
+        "iat": int(
+            datetime.now(timezone.utc).timestamp()
+        ),  # Issued at as Unix timestamp
+        "jti": secrets.token_urlsafe(16),  # JWT ID (unique identifier)
+        "roles": user.roles,  # User roles
+    }
+
+    return jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm="HS256")
+
+
+def decode_jwt_token(token: str, algorithms: list[str] | None = None) -> Dict:
     """Decode and validate a JWT token."""
     try:
         # Check if token is blacklisted
         if token in blacklisted_tokens:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Token has been revoked"
+                detail="Token has been revoked",
             )
-        
+
+        if not algorithms:
+            key = None
+            options = {"verify_signature": False, "verify_exp": True}
+        else:
+            key = settings.JWT_SECRET_KEY
+            options = {"verify_exp": True}
+
         # Decode the token
-        payload = jwt.decode(token, get_jwt_secret_key(), algorithms=["HS256"])
+        payload = jwt.decode(token, key, algorithms=algorithms, options=options)
         return payload
-    
+
     except jwt.ExpiredSignatureError:
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token has expired"
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Token has expired"
         )
     except jwt.InvalidTokenError:
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token"
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token"
         )
 
-def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> str:
+
+async def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+) -> UserModel | None:
+    """Extract and validate the current user from JWT token."""
+    token = credentials.credentials
+    payload = decode_jwt_token(token, ["HS256"])
+    username = payload.get("sub")
+
+    user = await get_user(username)
+
+    if username is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token payload"
+        )
+
+    return user
+
+
+def get_user_by_role(roles: list[str] | str) -> Callable:
+    async def wrapper(
+        credentials: HTTPAuthorizationCredentials = Depends(security),
+    ) -> UserModel:
+        user = await get_current_user(credentials)
+
+        if isinstance(roles, str):
+            access_roles = {
+                roles,
+            }
+        else:
+            access_roles = set(roles)
+
+        if access_roles & set(user.roles):
+            return user
+
+        raise HTTPException(
+            status_code=status.HTTP_405_METHOD_NOT_ALLOWED,
+            detail="You are not an admin!",
+        )
+
+    return wrapper
+
+
+def get_current_user_unsign(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+) -> str:
     """Extract and validate the current user from JWT token."""
     token = credentials.credentials
     payload = decode_jwt_token(token)
     username = payload.get("sub")
-    
+
     if username is None:
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token payload"
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token payload"
         )
-    
+
     return username
+
 
 def blacklist_token(token: str) -> None:
     """Add token to blacklist (for logout functionality)."""
     try:
-        payload = jwt.decode(token, get_jwt_secret_key(), algorithms=["HS256"])
+        payload = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=["HS256"])
         exp_timestamp = payload.get("exp")
         if exp_timestamp:
             exp_datetime = datetime.fromtimestamp(exp_timestamp, tz=timezone.utc)
             blacklisted_tokens[token] = exp_datetime
-            
+
             # Clean up expired blacklisted tokens
             cleanup_expired_blacklisted_tokens()
     except jwt.InvalidTokenError:
         # If token is invalid, no need to blacklist
         pass
 
+
 def cleanup_expired_blacklisted_tokens() -> None:
     """Remove expired tokens from blacklist to prevent memory leaks."""
     current_time = datetime.now(timezone.utc)
     expired_tokens = [
-        token for token, exp_time in blacklisted_tokens.items()
+        token
+        for token, exp_time in blacklisted_tokens.items()
         if exp_time < current_time
     ]
-    
+
     for token in expired_tokens:
-        del blacklisted_tokens[token] 
+        del blacklisted_tokens[token]
+
+
+def create_jwt_token_unsigned(username: str) -> str:
+    """Create an unsigned JWT token for the user."""
+    expire = datetime.now(timezone.utc) + timedelta(minutes=30)
+
+    payload = {
+        "sub": username,  # Subject (user identifier)
+        "exp": int(expire.timestamp()),  # Expiration time as Unix timestamp
+        "iat": int(
+            datetime.now(timezone.utc).timestamp()
+        ),  # Issued at as Unix timestamp
+        "jti": secrets.token_urlsafe(16),  # JWT ID (unique identifier)
+    }
+
+    return jwt.encode(payload, None, algorithm="none")
