@@ -147,6 +147,7 @@ def test_register_user(client):
     assert data["token_type"] == "bearer"
     assert "access_token" in data
     assert len(data["access_token"]) > 0
+    assert len(users) > 0
 
 
 def test_register_user_already_exists(client, test_user):
