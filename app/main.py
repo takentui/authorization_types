@@ -1,26 +1,29 @@
-from fastapi import FastAPI, Depends, status, HTTPException
+import logging.config
+
+from fastapi import FastAPI, Depends
+from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials
+from pydantic import UUID4
 
-
-from app.auth import (
-    get_current_user,
-    create_token_pair,
-    blacklist_token,
-    validate_credentials,
-    security,
-    validate_refresh_token,
-    revoke_refresh_token,
-    create_jwt_token,
-)
-from app.config import settings
+from app.config import settings, LOGGING_CONFIG
+from app.database.db import UserModel
 from app.models import (
     ErrorMessage,
     LoginRequest,
     LoginResponse,
     RefreshTokenRequest,
     RefreshTokenResponse,
+    RegistrationRequest,
 )
+from app.services.auth import (
+    get_current_user,
+    blacklist_token,
+    security,
+    generate_refresh_token,
+)
+from app.services.business_logic import register_new_user, authorize, roles
+from app.services.users import get_user
 
 app = FastAPI(
     title=settings.APP_NAME,
@@ -37,23 +40,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
-@app.get("/")
-async def root():
-    """Root endpoint."""
-    return {"message": "Welcome to the FastAPI JWT Auth Example"}
+logging.config.dictConfig(LOGGING_CONFIG)
 
 
 @app.get("/health")
 async def health_check():
     """Health check endpoint."""
     return {"status": "healthy"}
-
-
-@app.get("/public")
-async def public_route():
-    """Example public route accessible without authentication."""
-    return {"message": "This is a public route", "data": "public information"}
 
 
 @app.post(
@@ -71,21 +64,7 @@ async def public_route():
 )
 async def login(login_request: LoginRequest):
     """Login endpoint that returns both access and refresh tokens."""
-    # Validate credentials
-    if not validate_credentials(login_request.username, login_request.password):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid username or password",
-        )
-
-    # Create both access and refresh tokens
-    access_token, refresh_token = create_token_pair(login_request.username)
-
-    return LoginResponse(
-        access_token=access_token,
-        refresh_token=refresh_token,
-        username=login_request.username,
-    )
+    return jsonable_encoder(authorize(login_request))
 
 
 @app.post(
@@ -101,15 +80,10 @@ async def login(login_request: LoginRequest):
         },
     },
 )
-async def refresh_token(refresh_request: RefreshTokenRequest):
+async def refresh_token_handler(refresh_request: RefreshTokenRequest):
     """Refresh endpoint that generates a new access token using a refresh token."""
     # Validate refresh token and get username
-    username = validate_refresh_token(refresh_request.refresh_token)
-
-    # Create new access token
-    new_access_token = create_jwt_token(username)
-
-    return RefreshTokenResponse(access_token=new_access_token)
+    return generate_refresh_token(refresh_request.refresh_token)
 
 
 @app.get(
@@ -146,16 +120,11 @@ async def protected_route(username: str = Depends(get_current_user)):
     },
 )
 async def logout(
-    refresh_request: RefreshTokenRequest = None,
     credentials: HTTPAuthorizationCredentials = Depends(security),
 ):
     """Logout endpoint that blacklists the current JWT token and optionally revokes refresh token."""
     access_token = credentials.credentials
     blacklist_token(access_token)
-
-    # If refresh token provided, revoke it
-    if refresh_request and refresh_request.refresh_token:
-        revoke_refresh_token(refresh_request.refresh_token)
 
     return {"message": "Logout successful"}
 
@@ -164,6 +133,7 @@ async def logout(
     "/me",
     summary="Get current user info",
     description="Get information about the currently authenticated user",
+    response_model=UserModel,
     responses={
         200: {"description": "User information"},
         401: {
@@ -172,6 +142,38 @@ async def logout(
         },
     },
 )
-async def get_user_info(username: str = Depends(get_current_user)):
+async def get_user_info(user_uid: UUID4 = Depends(get_current_user)):
     """Get current user information from JWT token."""
-    return {"username": username, "message": "User information retrieved successfully"}
+    return jsonable_encoder(get_user(user_uid))
+
+
+@app.post(
+    "/registration",
+    response_model=RefreshTokenResponse,
+    summary="Register new user",
+    description="Register new user and get a new access token",
+    responses={
+        201: {"description": "User registered successfully"},
+    },
+)
+async def register_new_user_handler(
+    request: RegistrationRequest,
+) -> RefreshTokenResponse:
+    """Register new user"""
+    return jsonable_encoder(register_new_user(request))
+
+
+@app.get(
+    "/admin",
+    summary="For admin only",
+    responses={
+        200: {"description": "User information"},
+        403: {
+            "model": ErrorMessage,
+            "description": "Access forbidden",
+        },
+    },
+)
+@roles({"admin"})
+async def admin_handler(user_uid: UUID4 = Depends(get_current_user)):
+    return {"message": "It's for admin only!", "user_uid": user_uid}

@@ -1,4 +1,6 @@
-from pydantic import BaseModel
+import datetime
+
+from pydantic import BaseModel, UUID4
 
 
 class ErrorMessage(BaseModel):
@@ -12,6 +14,7 @@ class LoginRequest(BaseModel):
 
     username: str
     password: str
+    is_remember_me: bool = False
 
 
 class LoginResponse(BaseModel):
@@ -35,4 +38,20 @@ class RefreshTokenResponse(BaseModel):
 
     access_token: str
     token_type: str = "bearer"
+    refresh_token: str
     message: str = "Token refreshed successfully"
+
+
+class RegistrationRequest(BaseModel):
+    """Register request model."""
+
+    username: str
+    password: str
+    roles: list[str]
+    is_remember_me: bool = False
+
+
+class RefreshTokenInfo(BaseModel):
+    sub: UUID4
+    exp: datetime.datetime
+    is_remember_me: bool
